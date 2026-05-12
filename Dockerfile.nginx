@@ -1,0 +1,10 @@
+# -------------------------------------------------
+#  Nginx – Reverse‑proxy (imagen mínima)
+# -------------------------------------------------
+FROM nginx:alpine
+
+# Copiar la configuración que ya preparamos
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Exponer los puertos HTTP (80) y HTTPS (443)
+EXPOSE 80 443
