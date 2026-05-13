@@ -4,7 +4,7 @@ python-dotenv
 email-validator
 requests
 beautifulsoup4
-ddgs
+duckduckgo-search
 firebase-admin
 openai
 cryptography
