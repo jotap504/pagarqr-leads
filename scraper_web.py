@@ -130,12 +130,44 @@ with tab_scrap:
                 existing_leads = db.get_leads_by_campaign(active_campaign['id'])
                 existing_urls = {l['website'].lower() for l in existing_leads}
                 
-                # --- NUEVA LÓGICA: BÚSQUEDA EN GOOGLE ---
+                # --- PROCESAR PARÁMETROS ---
                 keyword_list = [k.strip() for k in keywords.split(",") if k.strip()]
                 exclude_list = [s.strip().lower() for s in exclude_sites.split(",") if s.strip()]
-                
                 urls_to_analyze = []
+
+                # --- MODO 1: OPENSTREETMAP (MAPA) ---
+                st.write(f"🗺️ Buscando empresas en el mapa...")
+                try:
+                    overpass_url = "https://overpass-api.de/api/interpreter"
+                    for k in keyword_list:
+                        osm_query = f"""
+                        [out:json][timeout:30];
+                        area["name"="{zone_label}"]->.searchArea;
+                        (
+                          node["name"~"{k}",i](area.searchArea);
+                          way["name"~"{k}",i](area.searchArea);
+                          node["industrial"~"{k}",i](area.searchArea);
+                          node["shop"~"{k}",i](area.searchArea);
+                        );
+                        out body;
+                        """
+                        response = requests.post(overpass_url, data={'data': osm_query}, timeout=35)
+                        if response.status_code == 200:
+                            data = response.json()
+                            elements = data.get('elements', [])
+                            st.write(f"📍 OSM encontró {len(elements)} resultados para '{k}'.")
+                            for el in elements:
+                                website = el.get('tags', {}).get('website')
+                                if website:
+                                    if not website.startswith('http'): website = 'http://' + website
+                                    urls_to_analyze.append(website)
+                except Exception as e:
+                    st.write(f"⚠️ Error en Mapa: {e}")
+
+                # --- MODO 2: GOOGLE (FALLBACK) ---
                 for k in keyword_list:
+
+
                     # Construir query de Google
                     q = f"{k} {zone_label} " + " ".join([f"-site:{s}" for s in exclude_list])
                     st.write(f"📡 Buscando en Google: *{k}*...")
