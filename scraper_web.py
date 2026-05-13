@@ -30,8 +30,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- BARRA LATERAL (GESTIÓN DE CAMPAÑAS) ---
-st.sidebar.image("/nav-logo.png", width=100)
+# st.sidebar.image("/nav-logo.png", width=100)
 st.sidebar.title("🎯 Control de Campañas")
+
 
 all_campaigns = db.get_campaigns()
 if all_campaigns:
