@@ -142,12 +142,20 @@ with tab_scrap:
                         
                         st.write(f"📡 Buscando en {zone_label}: *{k}*...")
                         try:
-                            # La región oficial (ar-es, es-es, etc.) es suficiente
+                            # Intento 1: Con Región oficial
                             res_list = list(ddgs.text(q, region=region_code, max_results=num_results // len(keyword_list) + 1))
+                            
+                            # Intento 2: Si falla, búsqueda normal sin parámetro de región
+                            if not res_list:
+                                st.write(f"🔄 Reintentando búsqueda general para: *{k}*...")
+                                q_fallback = f"{k} {zone_label} " + " ".join([f"-site:{s}" for s in exclude_list])
+                                res_list = list(ddgs.text(q_fallback, max_results=num_results // len(keyword_list) + 1))
+                            
                             all_found_batch.extend(res_list)
                         except Exception as e:
                             st.write(f"⚠️ Error en búsqueda: {e}")
                             continue
+
 
 
 
