@@ -35,30 +35,75 @@ with tab1:
             exclude_sites_raw = st.text_input("Sitios a excluir (ej: mercadolibre, facebook, instagram)", value="mercadolibre, facebook, instagram, youtube, pinterest")
             num_results = st.slider("Links a analizar", 10, 100, 20)
 
-    # Procesar lista de exclusión
+    # --- PROCESAR PARÁMETROS ---
     exclude_list = [s.strip().lower() for s in exclude_sites_raw.split(",") if s.strip()]
-    
-    # Construir Query para el buscador
     excl_str = " ".join([f"-site:{site}" for site in exclude_list])
     final_query = f"{keywords} {zone} {excl_str}".strip()
     st.code(f"Query enviada: {final_query}")
 
-    if st.button("🚀 Iniciar Extracción"):
-        with st.status("Buscando prospectos...") as status:
+    # Inicializar offset en session_state si no existe
+    if 'search_offset' not in st.session_state:
+        st.session_state.search_offset = 0
+
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🚀 Nueva Búsqueda (Primeros 100)", use_container_width=True):
+            st.session_state.search_offset = 0
+            st.rerun()
+
+    with col2:
+        if st.button("➕ Cargar Siguientes 100", use_container_width=True):
+            st.session_state.search_offset += 100
+            st.rerun()
+
+    # Si hay un offset activo, ejecutamos la búsqueda
+    if 'last_query' not in st.session_state:
+        st.session_state.last_query = ""
+
+    # Lógica de ejecución automática tras pulsar botones
+    trigger_search = False
+    if final_query != st.session_state.last_query:
+        # Si la query cambió, reseteamos todo
+        st.session_state.search_offset = 0
+        st.session_state.last_query = final_query
+    
+    # Usamos un flag para saber si acabamos de pulsar un botón de búsqueda
+    # (En Streamlit esto se suele manejar con un botón que cambia el estado)
+    
+    # Para simplificar la UX, vamos a ejecutar la búsqueda si el offset es > 0 
+    # o si es la primera vez que se pulsa el botón principal.
+    
+    # RE-DISEÑO DEL BOTÓN PARA EVITAR CONFUSIÓN:
+    st.markdown(f"**Progreso actual:** Resultados del {st.session_state.search_offset + 1} al {st.session_state.search_offset + 100}")
+
+    if st.button("🔍 Iniciar Proceso de Extracción", type="primary"):
+        with st.status(f"Analizando bloque {st.session_state.search_offset + 1} - {st.session_state.search_offset + 100}...") as status:
             results = []
             try:
-                with DDGS() as ddgs:
-                    search_results = list(ddgs.text(final_query, max_results=num_results))
+                # Obtenemos los leads existentes para evitar duplicados
+                existing_urls = set(db.get_all_leads()['website'].str.lower().tolist())
                 
-                for idx, res in enumerate(search_results):
+                with DDGS() as ddgs:
+                    # Pedimos hasta el final del bloque actual
+                    total_to_fetch = st.session_state.search_offset + 100
+                    all_results = list(ddgs.text(final_query, max_results=total_to_fetch))
+                    
+                    # Nos quedamos solo con los últimos 100 (o los que haya en el bloque)
+                    current_batch = all_results[st.session_state.search_offset:]
+                
+                for idx, res in enumerate(current_batch):
                     url = res.get('href', '').lower()
                     title = res.get('title', 'Sin título')
                     
-                    # --- FILTRO ESTRICTO DE EXCLUSIÓN ---
+                    # FILTRO DE EXCLUSIÓN
                     should_exclude = any(site in url for site in exclude_list)
+                    # FILTRO DE DUPLICADOS (ya en DB)
+                    is_duplicate = url in existing_urls
                     
-                    if url and not should_exclude:
+                    if url and not should_exclude and not is_duplicate:
                         st.write(f"✅ Analizando: {url}")
+
 
                         # Lógica de extracción (simplificada aquí, pero igual a la anterior)
                         try:
