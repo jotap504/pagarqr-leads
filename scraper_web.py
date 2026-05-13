@@ -116,18 +116,29 @@ with tab_scrap:
                 existing_urls = {l['website'].lower() for l in existing_leads}
                 exclude_list = [s.strip().lower() for s in exclude_sites.split(",") if s.strip()]
                 
-                final_query = f"{keywords} {zone} " + " ".join([f"-site:{s}" for s in exclude_list])
+                # --- NUEVA LÓGICA: MULTIPLES PALABRAS CLAVE ---
+                keyword_list = [k.strip() for k in keywords.split(",") if k.strip()]
+                exclude_list = [s.strip().lower() for s in exclude_sites.split(",") if s.strip()]
                 
+                all_found_batch = []
                 with DDGS() as ddgs:
-                    # Pedimos los resultados
-                    total_to_fetch = st.session_state.scrap_offset + num_results
-                    all_results = list(ddgs.text(final_query, max_results=total_to_fetch))
-                    batch = all_results[st.session_state.scrap_offset:]
-                    
-                st.write(f"🔎 El buscador encontró {len(batch)} páginas para analizar.")
+                    for k in keyword_list:
+                        q = f"{k} {zone} " + " ".join([f"-site:{s}" for s in exclude_list])
+                        st.write(f"📡 Buscando: *{k}*...")
+                        try:
+                            # Pedimos los resultados por cada palabra
+                            res_list = list(ddgs.text(q, max_results=num_results // len(keyword_list) + 1))
+                            all_found_batch.extend(res_list)
+                        except:
+                            continue
+
+                # Quitar duplicados de la búsqueda actual
+                unique_batch = {res['href']: res for res in all_found_batch if 'href' in res}.values()
+                st.write(f"🔎 Se encontraron {len(unique_batch)} páginas totales para analizar.")
                 
                 leads_encontrados = 0
-                for res in batch:
+                for res in unique_batch:
+
                     url = res.get('href', '').lower()
                     snippet = res.get('body', '') # El texto que sale en el buscador
                     title = res.get('title', 'Empresa desconocida')
