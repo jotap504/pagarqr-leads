@@ -130,12 +130,34 @@ with tab_scrap:
                             st.write(f"⚠️ Error {resp.status_code} en {url}")
                             continue
                             
+                        # 1. Intentar en la página principal
                         soup = BeautifulSoup(resp.text, 'html.parser')
-                        text = soup.get_text()
+                        emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', resp.text)
                         
-                        emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
-                        whas = re.findall(r'\+?\d{10,13}', text)
+                        # 2. Si no hay, buscar link de "Contacto" o "Nosotros"
+                        if not emails:
+                            contact_links = []
+                            for a in soup.find_all('a', href=True):
+                                link_text = a.get_text().lower()
+                                if 'contact' in link_text or 'nosotros' in link_text or 'quienes' in link_text:
+                                    href = a['href']
+                                    if href.startswith('/'): href = url.rstrip('/') + href
+                                    elif not href.startswith('http'): href = url.rstrip('/') + '/' + href
+                                    contact_links.append(href)
+                            
+                            # Analizar el primer link de contacto encontrado
+                            if contact_links:
+                                try:
+                                    c_resp = requests.get(contact_links[0], timeout=5, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
+                                    emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', c_resp.text)
+                                except:
+                                    pass
+
+                        whas = re.findall(r'\+?\d{10,13}', resp.text)
                         
+                        # Limpiar emails duplicados o basura (ej: .png, .jpg)
+                        emails = list(set([e for e in emails if not e.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg'))]))
+
                         if emails:
                             lead_data = {
                                 'company_name': res.get('title', 'Empresa desconocida'),
@@ -147,10 +169,11 @@ with tab_scrap:
                             st.write(f"✨ ¡Lead encontrado!: {emails[0]}")
                             leads_encontrados += 1
                         else:
-                            st.write(f"❌ No se detectaron emails en la página principal de {url}")
+                            st.write(f"❌ No se detectaron emails públicos en {url}")
                     except Exception as e:
-                        st.write(f"🚫 No se pudo acceder a {url}")
+                        st.write(f"🚫 Error analizando {url}")
                         continue
+
                 
                 if leads_encontrados > 0:
                     st.success(f"¡Éxito! Se encontraron y guardaron {leads_encontrados} leads nuevos en la campaña '{active_campaign['name']}'.")
