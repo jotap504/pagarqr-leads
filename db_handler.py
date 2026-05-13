@@ -30,8 +30,10 @@ class Database:
             if not firebase_admin._apps:
                 cred = credentials.Certificate(key_dict)
                 firebase_admin.initialize_app(cred)
-            return firestore.client()
+            # Especificamos el ID de la base de datos que usa tu proyecto
+            return firestore.client(database='pagar-webonline')
         else:
+
             print("⚠️ No se encontró configuración de Firebase. Firestore no estará disponible.")
             return None
 
