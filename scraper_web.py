@@ -92,18 +92,18 @@ with tab_scrap:
             with col_a:
                 keywords = st.text_input("Palabras clave (sepáralas por coma)", value=active_campaign.get('config', {}).get('keywords', "fabricante, dispenser"))
                 
-                # Mapeo de regiones para DuckDuckGo
+                # Mapeo de regiones
                 regions = {
                     "Argentina": "ar-es",
                     "España": "es-es",
                     "México": "mx-es",
                     "Chile": "cl-es",
-                    "Colombia": "co-es",
-                    "Uruguay": "uy-es",
                     "Global": "wt-wt"
                 }
                 zone_label = st.selectbox("País / Región", list(regions.keys()), index=0)
+                city_filter = st.text_input("Ciudad (Opcional - Más rápido)", placeholder="Ej: Buenos Aires")
                 region_code = regions[zone_label]
+
                 
             with col_b:
                 exclude_sites = st.text_input("Excluir sitios", value="mercadolibre, facebook, instagram, youtube")
@@ -136,19 +136,18 @@ with tab_scrap:
                 urls_to_analyze = []
 
                 # --- MODO 1: OPENSTREETMAP (MAPA) ---
-                st.write(f"🗺️ Buscando empresas en el mapa...")
+                st.write(f"🗺️ Buscando en el mapa...")
                 try:
                     overpass_url = "https://overpass-api.de/api/interpreter"
+                    # Usamos la ciudad si está, si no el país
+                    area_name = city_filter if city_filter else zone_label
                     for k in keyword_list:
-                        # Query Agresiva: Busca en cualquier etiqueta (nwr = node, way, relation)
                         osm_query = f"""
                         [out:json][timeout:30];
-                        area["name"="{zone_label}"]->.searchArea;
+                        area["name"="{area_name}"]->.searchArea;
                         (
                           nwr["name"~"{k}",i](area.searchArea);
-                          nwr["description"~"{k}",i](area.searchArea);
                           nwr["shop"~"{k}",i](area.searchArea);
-                          nwr["sport"~"{k}",i](area.searchArea);
                         );
                         out body;
                         """
@@ -156,22 +155,32 @@ with tab_scrap:
                         if response.status_code == 200:
                             data = response.json()
                             elements = data.get('elements', [])
-                            st.write(f"📍 Mapa: Se encontraron {len(elements)} lugares para '{k}'.")
+                            st.write(f"📍 Mapa: {len(elements)} resultados para '{k}' en {area_name}.")
                             for el in elements:
-                                tags = el.get('tags', {})
-                                website = tags.get('website') or tags.get('contact:website') or tags.get('url')
+                                website = el.get('tags', {}).get('website')
                                 if website:
                                     if not website.startswith('http'): website = 'http://' + website
                                     urls_to_analyze.append(website)
-                                    st.write(f"🔗 Web encontrada en mapa: {website}")
-                        else:
-                            st.write(f"⚠️ El servicio de mapas está lento, reintentando...")
                 except Exception as e:
-                    st.write(f"⚠️ Error en Mapa: {e}")
+                    st.write(f"⚠️ El mapa no respondió.")
 
-
-                # --- MODO 2: GOOGLE (FALLBACK) ---
+                # --- MODO 2: BRAVE / DUCKDUCKGO (FALLBACK) ---
                 for k in keyword_list:
+                    st.write(f"📡 Buscando en la web: *{k}*...")
+                    try:
+                        # Intentamos con un motor alternativo vía requests directo
+                        # para evitar bloqueos de librerías conocidas
+                        search_url = f"https://search.brave.com/search?q={k}+{area_name}"
+                        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                        b_resp = requests.get(search_url, headers=headers, timeout=10)
+                        b_urls = re.findall(r'href="(https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}[^"]*)"', b_resp.text)
+                        # Filtrar solo links que no sean de Brave/Google/etc
+                        for u in b_urls:
+                            if not any(x in u for x in ['brave.com', 'google', 'facebook', 'instagram', 'twitter', 'microsoft']):
+                                urls_to_analyze.append(u)
+                    except:
+                        pass
+
 
 
                     # Construir query de Google
