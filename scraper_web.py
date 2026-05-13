@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
-from duckduckgo_search import DDGS
+from googlesearch import search
 import requests
+
 from bs4 import BeautifulSoup
 import re
 import time
@@ -128,60 +129,37 @@ with tab_scrap:
             with st.status("Procesando búsqueda...") as status:
                 existing_leads = db.get_leads_by_campaign(active_campaign['id'])
                 existing_urls = {l['website'].lower() for l in existing_leads}
-                exclude_list = [s.strip().lower() for s in exclude_sites.split(",") if s.strip()]
                 
-                # --- NUEVA LÓGICA: MULTIPLES PALABRAS CLAVE ---
+                # --- NUEVA LÓGICA: BÚSQUEDA EN GOOGLE ---
                 keyword_list = [k.strip() for k in keywords.split(",") if k.strip()]
                 exclude_list = [s.strip().lower() for s in exclude_sites.split(",") if s.strip()]
                 
-                all_found_batch = []
-                with DDGS() as ddgs:
-                    for k in keyword_list:
-                        # Query simplificada: la región se encarga del resto
-                        q = f"{k} " + " ".join([f"-site:{s}" for s in exclude_list])
-                        
-                        st.write(f"📡 Buscando en {zone_label}: *{k}*...")
-                        try:
-                            # Intento 1: Backend API (el normal)
-                            res_list = list(ddgs.text(q, region=region_code, max_results=num_results // len(keyword_list) + 1))
-                            
-                            # Intento 2: Si falla, probamos con el backend LITE (más difícil de bloquear)
-                            if not res_list:
-                                st.write(f"🔄 Modo Lite para: *{k}*...")
-                                res_list = list(ddgs.text(q, region=region_code, backend="lite", max_results=num_results // len(keyword_list) + 1))
-                            
-                            # Intento 3: Si falla, probamos con el backend HTML
-                            if not res_list:
-                                st.write(f"🔄 Modo HTML para: *{k}*...")
-                                res_list = list(ddgs.text(q, region=region_code, backend="html", max_results=num_results // len(keyword_list) + 1))
-                                
-                            all_found_batch.extend(res_list)
-                        except Exception as e:
-                            st.write(f"⚠️ Error técnico en búsqueda: {e}")
-                            continue
+                urls_to_analyze = []
+                for k in keyword_list:
+                    # Construir query de Google
+                    q = f"{k} {zone_label} " + " ".join([f"-site:{s}" for s in exclude_list])
+                    st.write(f"📡 Buscando en Google: *{k}*...")
+                    try:
+                        # Google Search via googlesearch-python
+                        # Buscamos los primeros N resultados
+                        results = search(q, num_results=num_results // len(keyword_list) + 1, lang="es")
+                        for url in results:
+                            urls_to_analyze.append(url)
+                    except Exception as e:
+                        st.write(f"⚠️ Error en Google Search: {e}")
+                        continue
 
-
-
-
-
-                # Quitar duplicados de la búsqueda actual
-                unique_batch = {res['href']: res for res in all_found_batch if 'href' in res}.values()
-                st.write(f"🔎 Se encontraron {len(unique_batch)} páginas totales para analizar.")
+                # Quitar duplicados
+                unique_urls = list(set(urls_to_analyze))
+                st.write(f"🔎 Google encontró {len(unique_urls)} páginas para analizar.")
                 
                 leads_encontrados = 0
-                for res in unique_batch:
-
-                    url = res.get('href', '').lower()
-                    snippet = res.get('body', '') # El texto que sale en el buscador
-                    title = res.get('title', 'Empresa desconocida')
-                    
-                    if not url or any(s in url for s in exclude_list) or url in existing_urls:
+                for url in unique_urls:
+                    url = url.lower()
+                    if any(s in url for s in exclude_list) or url in existing_urls:
                         continue
                     
                     st.write(f"🔍 Analizando: {url}")
-                    
-                    # --- INTENTO 1: EXTRAER DEL SNIPPET (MUY EFICAZ) ---
-                    emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', snippet)
                     
                     # --- INTENTO 2: ENTRAR A LA WEB SI NO HAY EN SNIPPET ---
                     if not emails:
