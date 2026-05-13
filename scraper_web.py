@@ -142,19 +142,24 @@ with tab_scrap:
                         
                         st.write(f"📡 Buscando en {zone_label}: *{k}*...")
                         try:
-                            # Intento 1: Con Región oficial
+                            # Intento 1: Backend API (el normal)
                             res_list = list(ddgs.text(q, region=region_code, max_results=num_results // len(keyword_list) + 1))
                             
-                            # Intento 2: Si falla, búsqueda normal sin parámetro de región
+                            # Intento 2: Si falla, probamos con el backend LITE (más difícil de bloquear)
                             if not res_list:
-                                st.write(f"🔄 Reintentando búsqueda general para: *{k}*...")
-                                q_fallback = f"{k} {zone_label} " + " ".join([f"-site:{s}" for s in exclude_list])
-                                res_list = list(ddgs.text(q_fallback, max_results=num_results // len(keyword_list) + 1))
+                                st.write(f"🔄 Modo Lite para: *{k}*...")
+                                res_list = list(ddgs.text(q, region=region_code, backend="lite", max_results=num_results // len(keyword_list) + 1))
                             
+                            # Intento 3: Si falla, probamos con el backend HTML
+                            if not res_list:
+                                st.write(f"🔄 Modo HTML para: *{k}*...")
+                                res_list = list(ddgs.text(q, region=region_code, backend="html", max_results=num_results // len(keyword_list) + 1))
+                                
                             all_found_batch.extend(res_list)
                         except Exception as e:
-                            st.write(f"⚠️ Error en búsqueda: {e}")
+                            st.write(f"⚠️ Error técnico en búsqueda: {e}")
                             continue
+
 
 
 
