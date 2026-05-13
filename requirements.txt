@@ -8,3 +8,4 @@ duckduckgo-search
 firebase-admin
 openai
 cryptography
+cloudscraper

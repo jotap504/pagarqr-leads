@@ -10,6 +10,11 @@ from ai_handler import AIHandler
 from encryptor import Encryptor
 from email_sender import EmailSender
 import os
+import cloudscraper
+
+# Inicializar scraper avanzado
+scraper = cloudscraper.create_scraper()
+
 
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="PagarQR Marketing Pro", page_icon="🚀", layout="wide")
@@ -111,74 +116,73 @@ with tab_scrap:
                 existing_urls = {l['website'].lower() for l in existing_leads}
                 exclude_list = [s.strip().lower() for s in exclude_sites.split(",") if s.strip()]
                 
-                query = f"{keywords} {zone} " + " ".join([f"-site:{s}" for s in exclude_list])
+                final_query = f"{keywords} {zone} " + " ".join([f"-site:{s}" for s in exclude_list])
                 
                 with DDGS() as ddgs:
-                    all_res = list(ddgs.text(query, max_results=st.session_state.scrap_offset + num_results))
-                    batch = all_res[st.session_state.scrap_offset:]
-
+                    # Pedimos los resultados
+                    total_to_fetch = st.session_state.scrap_offset + num_results
+                    all_results = list(ddgs.text(final_query, max_results=total_to_fetch))
+                    batch = all_results[st.session_state.scrap_offset:]
+                    
+                st.write(f"🔎 El buscador encontró {len(batch)} páginas para analizar.")
+                
                 leads_encontrados = 0
                 for res in batch:
                     url = res.get('href', '').lower()
+                    snippet = res.get('body', '') # El texto que sale en el buscador
+                    title = res.get('title', 'Empresa desconocida')
+                    
                     if not url or any(s in url for s in exclude_list) or url in existing_urls:
                         continue
                     
                     st.write(f"🔍 Analizando: {url}")
-                    try:
-                        resp = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
-                        if resp.status_code != 200:
-                            st.write(f"⚠️ Error {resp.status_code} en {url}")
-                            continue
-                            
-                        # 1. Intentar en la página principal
-                        soup = BeautifulSoup(resp.text, 'html.parser')
-                        emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', resp.text)
-                        
-                        # 2. Si no hay, buscar link de "Contacto" o "Nosotros"
-                        if not emails:
-                            contact_links = []
-                            for a in soup.find_all('a', href=True):
-                                link_text = a.get_text().lower()
-                                if 'contact' in link_text or 'nosotros' in link_text or 'quienes' in link_text:
-                                    href = a['href']
-                                    if href.startswith('/'): href = url.rstrip('/') + href
-                                    elif not href.startswith('http'): href = url.rstrip('/') + '/' + href
-                                    contact_links.append(href)
-                            
-                            # Analizar el primer link de contacto encontrado
-                            if contact_links:
-                                try:
-                                    c_resp = requests.get(contact_links[0], timeout=5, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
-                                    emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', c_resp.text)
-                                except:
-                                    pass
+                    
+                    # --- INTENTO 1: EXTRAER DEL SNIPPET (MUY EFICAZ) ---
+                    emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', snippet)
+                    
+                    # --- INTENTO 2: ENTRAR A LA WEB SI NO HAY EN SNIPPET ---
+                    if not emails:
+                        try:
+                            # Usamos cloudscraper para saltar protecciones
+                            resp = scraper.get(url, timeout=10)
+                            if resp.status_code == 200:
+                                # Buscar en página principal
+                                emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', resp.text)
+                                
+                                # Si no hay, buscar link de contacto
+                                if not emails:
+                                    soup = BeautifulSoup(resp.text, 'html.parser')
+                                    for a in soup.find_all('a', href=True):
+                                        if any(x in a.get_text().lower() for x in ['contact', 'nosotros', 'quienes']):
+                                            c_url = a['href']
+                                            if c_url.startswith('/'): c_url = url.rstrip('/') + c_url
+                                            elif not c_url.startswith('http'): c_url = url.rstrip('/') + '/' + c_url
+                                            c_resp = scraper.get(c_url, timeout=5)
+                                            emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', c_resp.text)
+                                            if emails: break
+                        except:
+                            pass
 
-                        whas = re.findall(r'\+?\d{10,13}', resp.text)
-                        
-                        # Limpiar emails duplicados o basura (ej: .png, .jpg)
-                        emails = list(set([e for e in emails if not e.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg'))]))
+                    # Limpiar y guardar
+                    emails = list(set([e for e in emails if not e.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg'))]))
+                    
+                    if emails:
+                        db.insert_lead({
+                            'company_name': title,
+                            'website': url,
+                            'email': emails[0],
+                            'whatsapp': "" # El whatsapp es más difícil de sacar así
+                        }, active_campaign['id'])
+                        st.write(f"✨ ¡Lead encontrado!: {emails[0]}")
+                        leads_encontrados += 1
+                        existing_urls.add(url)
+                    else:
+                        st.write(f"❌ No se detectaron emails públicos.")
 
-                        if emails:
-                            lead_data = {
-                                'company_name': res.get('title', 'Empresa desconocida'),
-                                'website': url,
-                                'email': emails[0],
-                                'whatsapp': whas[0] if whas else ""
-                            }
-                            db.insert_lead(lead_data, active_campaign['id'])
-                            st.write(f"✨ ¡Lead encontrado!: {emails[0]}")
-                            leads_encontrados += 1
-                        else:
-                            st.write(f"❌ No se detectaron emails públicos en {url}")
-                    except Exception as e:
-                        st.write(f"🚫 Error analizando {url}")
-                        continue
-
-                
                 if leads_encontrados > 0:
-                    st.success(f"¡Éxito! Se encontraron y guardaron {leads_encontrados} leads nuevos en la campaña '{active_campaign['name']}'.")
+                    st.success(f"¡Éxito! Se encontraron y guardaron {leads_encontrados} leads nuevos.")
                 else:
-                    st.warning("Búsqueda finalizada, pero no se extrajeron emails nuevos. Intenta con otras palabras clave o aumenta el número de resultados.")
+                    st.warning("No se extrajeron emails. Prueba cambiando las palabras clave (ej: agrega la palabra 'contacto' o 'distribuidor').")
 
 
 # --- TAB 3: FILTRADO IA (DEEPSEEK) ---
