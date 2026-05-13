@@ -1,11 +1,24 @@
 from cryptography.fernet import Fernet
 import os
+import base64
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 class Encryptor:
     def __init__(self):
-        # En producción, esta KEY debería estar en Streamlit Secrets
-        self.key = os.getenv("ENCRYPTION_KEY", Fernet.generate_key().decode())
-        self.cipher = Fernet(self.key.encode())
+        # Tomamos la frase del usuario y la convertimos en una llave válida de 32 bytes
+        passphrase = os.getenv("ENCRYPTION_KEY", "default-secret-key-123")
+        
+        # Derivamos una llave segura de la frase (PBKDF2)
+        salt = b'pagarqr-salt-123' # Sal fija para este caso simple
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100000,
+        )
+        key = base64.urlsafe_b64encode(kdf.derive(passphrase.encode()))
+        self.cipher = Fernet(key)
 
     def encrypt(self, text):
         if not text: return ""
