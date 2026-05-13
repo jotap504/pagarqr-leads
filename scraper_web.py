@@ -32,13 +32,16 @@ with tab1:
             keywords = st.text_input("Palabras clave", value="fabricante dispenser agua caliente mate")
             zone = st.text_input("Zona o Ubicación", value="Argentina")
         with col_b:
-            exclude_sites = st.text_input("Sitios a excluir (comma separated)", value="mercadolibre.com.ar, facebook.com, instagram.com")
+            exclude_sites_raw = st.text_input("Sitios a excluir (ej: mercadolibre, facebook, instagram)", value="mercadolibre, facebook, instagram, youtube, pinterest")
             num_results = st.slider("Links a analizar", 10, 100, 20)
 
-    # Construir Query
-    excl_str = " ".join([f"-site:{site.strip()}" for site in exclude_sites.split(",") if site.strip()])
+    # Procesar lista de exclusión
+    exclude_list = [s.strip().lower() for s in exclude_sites_raw.split(",") if s.strip()]
+    
+    # Construir Query para el buscador
+    excl_str = " ".join([f"-site:{site}" for site in exclude_list])
     final_query = f"{keywords} {zone} {excl_str}".strip()
-    st.code(f"Query: {final_query}")
+    st.code(f"Query enviada: {final_query}")
 
     if st.button("🚀 Iniciar Extracción"):
         with st.status("Buscando prospectos...") as status:
@@ -48,10 +51,15 @@ with tab1:
                     search_results = list(ddgs.text(final_query, max_results=num_results))
                 
                 for idx, res in enumerate(search_results):
-                    url = res.get('href', '')
+                    url = res.get('href', '').lower()
                     title = res.get('title', 'Sin título')
-                    if url:
-                        st.write(f"Analizando: {url}")
+                    
+                    # --- FILTRO ESTRICTO DE EXCLUSIÓN ---
+                    should_exclude = any(site in url for site in exclude_list)
+                    
+                    if url and not should_exclude:
+                        st.write(f"✅ Analizando: {url}")
+
                         # Lógica de extracción (simplificada aquí, pero igual a la anterior)
                         try:
                             headers = {'User-Agent': 'Mozilla/5.0'}
