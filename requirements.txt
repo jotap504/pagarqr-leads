@@ -9,3 +9,4 @@ firebase-admin
 openai
 cryptography
 cloudscraper
+googlemaps

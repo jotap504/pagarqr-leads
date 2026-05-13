@@ -1,7 +1,7 @@
-import streamlit as st
-import pandas as pd
 from googlesearch import search
 import requests
+import googlemaps
+
 
 from bs4 import BeautifulSoup
 import re
@@ -15,6 +15,13 @@ import cloudscraper
 
 # Inicializar scraper avanzado
 scraper = cloudscraper.create_scraper()
+
+# Intentar inicializar Google Maps
+gmaps_key = st.secrets.get("GOOGLE_MAPS_API_KEY")
+gmaps = None
+if gmaps_key:
+    gmaps = googlemaps.Client(key=gmaps_key)
+
 
 
 # --- CONFIGURACIÓN ---
@@ -135,8 +142,36 @@ with tab_scrap:
                 exclude_list = [s.strip().lower() for s in exclude_sites.split(",") if s.strip()]
                 urls_to_analyze = {} # Usamos dict para guardar URL -> Fuente
 
+                # --- MODO 0: GOOGLE PLACES (PREMIUM) ---
+                if gmaps:
+                    st.write(f"🌟 Buscando en Google Maps (Premium)...")
+                    try:
+                        for k in keyword_list:
+                            # Buscar lugares en Google Maps
+                            places_result = gmaps.places(query=f"{k} in {area_name}")
+                            results = places_result.get('results', [])
+                            st.write(f"📍 Google Maps encontró {len(results)} empresas para '{k}'.")
+                            
+                            for place in results:
+                                name = place.get('name', 'Empresa')
+                                place_id = place.get('place_id')
+                                
+                                # Obtener detalles del lugar (especialmente la web)
+                                details = gmaps.place(place_id=place_id, fields=['website', 'formatted_phone_number', 'formatted_address'])
+                                d_res = details.get('result', {})
+                                website = d_res.get('website')
+                                
+                                if website:
+                                    if not website.startswith('http'): website = 'http://' + website
+                                    if website not in urls_to_analyze:
+                                        urls_to_analyze[website] = f"📍 Google Maps: {name}"
+                    except Exception as e:
+                        st.write(f"⚠️ Error en Google Places: {e}")
+                else:
+                    st.warning("⚠️ No se detectó 'GOOGLE_MAPS_API_KEY' en los Secrets. Usando motores gratuitos...")
+
                 # --- MODO 1: OPENSTREETMAP (MAPA) ---
-                st.write(f"🗺️ Buscando empresas en el mapa...")
+                st.write(f"🗺️ Buscando en el mapa libre...")
                 try:
                     overpass_url = "https://overpass-api.de/api/interpreter"
                     area_name = city_filter if city_filter else zone_label
@@ -155,14 +190,16 @@ with tab_scrap:
                         if response.status_code == 200:
                             data = response.json()
                             elements = data.get('elements', [])
-                            st.write(f"📍 Mapa: {len(elements)} resultados para '{k}' en {area_name}.")
+                            st.write(f"📍 Mapa OSM: {len(elements)} resultados para '{k}'.")
                             for el in elements:
                                 website = el.get('tags', {}).get('website')
                                 if website:
                                     if not website.startswith('http'): website = 'http://' + website
-                                    urls_to_analyze[website] = "🗺️ Mapa (OSM)"
-                except Exception as e:
-                    st.write(f"⚠️ El mapa no respondió.")
+                                    if website not in urls_to_analyze:
+                                        urls_to_analyze[website] = "🗺️ Mapa (OSM)"
+                except:
+                    pass
+
 
                 # --- MODO 2: BRAVE (WEB) ---
                 for k in keyword_list:
