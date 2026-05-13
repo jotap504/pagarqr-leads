@@ -137,20 +137,18 @@ with tab_scrap:
                 all_found_batch = []
                 with DDGS() as ddgs:
                     for k in keyword_list:
-                        # Si es Argentina, forzamos que el término incluya algo local
-                        search_term = f"{k}"
-                        if zone_label == "Argentina":
-                            search_term = f"{k} site:.ar OR {k} Argentina"
+                        # Query simplificada: la región se encarga del resto
+                        q = f"{k} " + " ".join([f"-site:{s}" for s in exclude_list])
                         
-                        q = f"{search_term} " + " ".join([f"-site:{s}" for s in exclude_list])
                         st.write(f"📡 Buscando en {zone_label}: *{k}*...")
                         try:
-                            # Usamos el parámetro 'region' oficial de DDG
+                            # La región oficial (ar-es, es-es, etc.) es suficiente
                             res_list = list(ddgs.text(q, region=region_code, max_results=num_results // len(keyword_list) + 1))
                             all_found_batch.extend(res_list)
                         except Exception as e:
-                            st.write(f"⚠️ Error en búsqueda de '{k}': {e}")
+                            st.write(f"⚠️ Error en búsqueda: {e}")
                             continue
+
 
 
                 # Quitar duplicados de la búsqueda actual
