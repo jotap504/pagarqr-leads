@@ -140,14 +140,15 @@ with tab_scrap:
                 try:
                     overpass_url = "https://overpass-api.de/api/interpreter"
                     for k in keyword_list:
+                        # Query Agresiva: Busca en cualquier etiqueta (nwr = node, way, relation)
                         osm_query = f"""
                         [out:json][timeout:30];
                         area["name"="{zone_label}"]->.searchArea;
                         (
-                          node["name"~"{k}",i](area.searchArea);
-                          way["name"~"{k}",i](area.searchArea);
-                          node["industrial"~"{k}",i](area.searchArea);
-                          node["shop"~"{k}",i](area.searchArea);
+                          nwr["name"~"{k}",i](area.searchArea);
+                          nwr["description"~"{k}",i](area.searchArea);
+                          nwr["shop"~"{k}",i](area.searchArea);
+                          nwr["sport"~"{k}",i](area.searchArea);
                         );
                         out body;
                         """
@@ -155,14 +156,19 @@ with tab_scrap:
                         if response.status_code == 200:
                             data = response.json()
                             elements = data.get('elements', [])
-                            st.write(f"📍 OSM encontró {len(elements)} resultados para '{k}'.")
+                            st.write(f"📍 Mapa: Se encontraron {len(elements)} lugares para '{k}'.")
                             for el in elements:
-                                website = el.get('tags', {}).get('website')
+                                tags = el.get('tags', {})
+                                website = tags.get('website') or tags.get('contact:website') or tags.get('url')
                                 if website:
                                     if not website.startswith('http'): website = 'http://' + website
                                     urls_to_analyze.append(website)
+                                    st.write(f"🔗 Web encontrada en mapa: {website}")
+                        else:
+                            st.write(f"⚠️ El servicio de mapas está lento, reintentando...")
                 except Exception as e:
                     st.write(f"⚠️ Error en Mapa: {e}")
+
 
                 # --- MODO 2: GOOGLE (FALLBACK) ---
                 for k in keyword_list:
