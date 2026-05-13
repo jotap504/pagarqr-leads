@@ -117,14 +117,19 @@ with tab_scrap:
                     all_res = list(ddgs.text(query, max_results=st.session_state.scrap_offset + num_results))
                     batch = all_res[st.session_state.scrap_offset:]
 
+                leads_encontrados = 0
                 for res in batch:
                     url = res.get('href', '').lower()
                     if not url or any(s in url for s in exclude_list) or url in existing_urls:
                         continue
                     
-                    st.write(f"✅ Analizando: {url}")
+                    st.write(f"🔍 Analizando: {url}")
                     try:
                         resp = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
+                        if resp.status_code != 200:
+                            st.write(f"⚠️ Error {resp.status_code} en {url}")
+                            continue
+                            
                         soup = BeautifulSoup(resp.text, 'html.parser')
                         text = soup.get_text()
                         
@@ -132,15 +137,26 @@ with tab_scrap:
                         whas = re.findall(r'\+?\d{10,13}', text)
                         
                         if emails:
-                            db.insert_lead({
+                            lead_data = {
                                 'company_name': res.get('title', 'Empresa desconocida'),
                                 'website': url,
                                 'email': emails[0],
                                 'whatsapp': whas[0] if whas else ""
-                            }, active_campaign['id'])
-                    except:
+                            }
+                            db.insert_lead(lead_data, active_campaign['id'])
+                            st.write(f"✨ ¡Lead encontrado!: {emails[0]}")
+                            leads_encontrados += 1
+                        else:
+                            st.write(f"❌ No se detectaron emails en la página principal de {url}")
+                    except Exception as e:
+                        st.write(f"🚫 No se pudo acceder a {url}")
                         continue
-                st.success("Búsqueda completada y guardada en la campaña.")
+                
+                if leads_encontrados > 0:
+                    st.success(f"¡Éxito! Se encontraron y guardaron {leads_encontrados} leads nuevos en la campaña '{active_campaign['name']}'.")
+                else:
+                    st.warning("Búsqueda finalizada, pero no se extrajeron emails nuevos. Intenta con otras palabras clave o aumenta el número de resultados.")
+
 
 # --- TAB 3: FILTRADO IA (DEEPSEEK) ---
 with tab_filter:
