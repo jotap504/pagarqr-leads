@@ -1,6 +1,8 @@
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import credentials
+from google.cloud import firestore
 import os
+
 import json
 from datetime import datetime
 
@@ -30,9 +32,15 @@ class Database:
             if not firebase_admin._apps:
                 cred = credentials.Certificate(key_dict)
                 firebase_admin.initialize_app(cred)
-            # Especificamos el ID de la base de datos que usa tu proyecto
-            return firestore.client(database='pagar-webonline')
+            
+            # Usamos el cliente directo de Google Cloud que es más flexible
+            return firestore.Client(
+                project=key_dict.get('project_id'),
+                database='pagar-webonline',
+                credentials=credentials.Certificate(key_dict).get_credential()
+            )
         else:
+
 
             print("⚠️ No se encontró configuración de Firebase. Firestore no estará disponible.")
             return None
