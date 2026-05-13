@@ -89,11 +89,25 @@ with tab_scrap:
         with st.expander("⚙️ Configuración de Búsqueda", expanded=True):
             col_a, col_b = st.columns(2)
             with col_a:
-                keywords = st.text_input("Palabras clave", value=active_campaign.get('config', {}).get('keywords', "fabricante dispenser agua"))
-                zone = st.text_input("Zona", value=active_campaign.get('config', {}).get('zone', "Argentina"))
+                keywords = st.text_input("Palabras clave (sepáralas por coma)", value=active_campaign.get('config', {}).get('keywords', "fabricante, dispenser"))
+                
+                # Mapeo de regiones para DuckDuckGo
+                regions = {
+                    "Argentina": "ar-es",
+                    "España": "es-es",
+                    "México": "mx-es",
+                    "Chile": "cl-es",
+                    "Colombia": "co-es",
+                    "Uruguay": "uy-es",
+                    "Global": "wt-wt"
+                }
+                zone_label = st.selectbox("País / Región", list(regions.keys()), index=0)
+                region_code = regions[zone_label]
+                
             with col_b:
                 exclude_sites = st.text_input("Excluir sitios", value="mercadolibre, facebook, instagram, youtube")
-                num_results = st.slider("Resultados por bloque", 10, 100, 20)
+                num_results = st.slider("Resultados por bloque", 10, 500, 50)
+
 
         # Lógica de Offset
         if 'scrap_offset' not in st.session_state: st.session_state.scrap_offset = 0
@@ -123,14 +137,21 @@ with tab_scrap:
                 all_found_batch = []
                 with DDGS() as ddgs:
                     for k in keyword_list:
-                        q = f"{k} {zone} " + " ".join([f"-site:{s}" for s in exclude_list])
-                        st.write(f"📡 Buscando: *{k}*...")
+                        # Si es Argentina, forzamos que el término incluya algo local
+                        search_term = f"{k}"
+                        if zone_label == "Argentina":
+                            search_term = f"{k} site:.ar OR {k} Argentina"
+                        
+                        q = f"{search_term} " + " ".join([f"-site:{s}" for s in exclude_list])
+                        st.write(f"📡 Buscando en {zone_label}: *{k}*...")
                         try:
-                            # Pedimos los resultados por cada palabra
-                            res_list = list(ddgs.text(q, max_results=num_results // len(keyword_list) + 1))
+                            # Usamos el parámetro 'region' oficial de DDG
+                            res_list = list(ddgs.text(q, region=region_code, max_results=num_results // len(keyword_list) + 1))
                             all_found_batch.extend(res_list)
-                        except:
+                        except Exception as e:
+                            st.write(f"⚠️ Error en búsqueda de '{k}': {e}")
                             continue
+
 
                 # Quitar duplicados de la búsqueda actual
                 unique_batch = {res['href']: res for res in all_found_batch if 'href' in res}.values()
