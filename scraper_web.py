@@ -208,16 +208,20 @@ with tab_scrap:
                     
                     st.write(f"🔍 Analizando: {url}")
                     emails = []
+                    title = url.split("//")[-1].split("/")[0] # Nombre base del sitio como título
                     
                     try:
                         # Intentar entrar a la web
                         resp = scraper.get(url, timeout=10)
                         if resp.status_code == 200:
+                            # Sacar título real de la página si es posible
+                            soup = BeautifulSoup(resp.text, 'html.parser')
+                            if soup.title: title = soup.title.string.strip()
+                            
                             emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', resp.text)
                             
                             # Si no hay en portada, buscar contacto
                             if not emails:
-                                soup = BeautifulSoup(resp.text, 'html.parser')
                                 for a in soup.find_all('a', href=True):
                                     if any(x in a.get_text().lower() for x in ['contact', 'nosotros', 'quienes']):
                                         c_url = a['href']
@@ -229,44 +233,22 @@ with tab_scrap:
                     except:
                         pass
                     
-                    # --- INTENTO 2: ENTRAR A LA WEB SI NO HAY EN SNIPPET ---
-                    if not emails:
-                        try:
-                            # Usamos cloudscraper para saltar protecciones
-                            resp = scraper.get(url, timeout=10)
-                            if resp.status_code == 200:
-                                # Buscar en página principal
-                                emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', resp.text)
-                                
-                                # Si no hay, buscar link de contacto
-                                if not emails:
-                                    soup = BeautifulSoup(resp.text, 'html.parser')
-                                    for a in soup.find_all('a', href=True):
-                                        if any(x in a.get_text().lower() for x in ['contact', 'nosotros', 'quienes']):
-                                            c_url = a['href']
-                                            if c_url.startswith('/'): c_url = url.rstrip('/') + c_url
-                                            elif not c_url.startswith('http'): c_url = url.rstrip('/') + '/' + c_url
-                                            c_resp = scraper.get(c_url, timeout=5)
-                                            emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', c_resp.text)
-                                            if emails: break
-                        except:
-                            pass
-
                     # Limpiar y guardar
                     emails = list(set([e for e in emails if not e.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg'))]))
                     
                     if emails:
                         db.insert_lead({
-                            'company_name': title,
+                            'company_name': title[:50], # Limitar largo del título
                             'website': url,
                             'email': emails[0],
-                            'whatsapp': "" # El whatsapp es más difícil de sacar así
+                            'whatsapp': "" 
                         }, active_campaign['id'])
                         st.write(f"✨ ¡Lead encontrado!: {emails[0]}")
                         leads_encontrados += 1
                         existing_urls.add(url)
                     else:
                         st.write(f"❌ No se detectaron emails públicos.")
+
 
                 if leads_encontrados > 0:
                     st.success(f"¡Éxito! Se encontraron y guardaron {leads_encontrados} leads nuevos.")
