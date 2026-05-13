@@ -1,194 +1,209 @@
 import streamlit as st
 import pandas as pd
+from duckduckgo_search import DDGS
+import requests
+from bs4 import BeautifulSoup
 import re
 import time
-import requests
-import os
-from bs4 import BeautifulSoup
-from ddgs import DDGS
 from db_handler import Database
+from ai_handler import AIHandler
+from encryptor import Encryptor
 from email_sender import EmailSender
+import os
 
-# Configuración de página
-st.set_page_config(page_title="PagarQR - Lead Scraper", page_icon="🔍", layout="wide")
+# --- CONFIGURACIÓN ---
+st.set_page_config(page_title="PagarQR Marketing Pro", page_icon="🚀", layout="wide")
 
-# Inicializar Base de Datos y Email
+# Inicializar clases
 db = Database()
-mailer = EmailSender()
+ai = AIHandler()
+enc = Encryptor()
 
-st.title("🔍 PagarQR - B2B Lead Scraper & CRM")
+# --- ESTILOS ---
+st.markdown("""
+    <style>
+    .main { background-color: #f8f9fa; }
+    .stButton>button { border-radius: 8px; }
+    .status-valid { color: #28a745; font-weight: bold; }
+    .status-discarded { color: #dc3545; font-weight: bold; }
+    </style>
+""", unsafe_allow_html=True)
 
-# Tabs principales
-tab1, tab2, tab3 = st.tabs(["🚀 Scraper", "📋 Depuración (CRM)", "✉️ Campañas Email"])
+# --- BARRA LATERAL (GESTIÓN DE CAMPAÑAS) ---
+st.sidebar.image("/nav-logo.png", width=100)
+st.sidebar.title("🎯 Control de Campañas")
 
-# --- TAB 1: SCRAPER ---
-with tab1:
-    st.header("Extracción de Leads")
+all_campaigns = db.get_campaigns()
+if all_campaigns:
+    campaign_names = [c['name'] for c in all_campaigns]
+    selected_campaign_name = st.sidebar.selectbox("Seleccionar Campaña Activa", campaign_names)
+    active_campaign = next(c for c in all_campaigns if c['name'] == selected_campaign_name)
+    st.sidebar.info(f"Estado: {active_campaign['status'].upper()}")
+else:
+    active_campaign = None
+    st.sidebar.warning("No hay campañas creadas.")
+
+# --- TABS PRINCIPALES ---
+tab_camp, tab_scrap, tab_filter, tab_mail = st.tabs([
+    "📂 Gestión de Campañas", 
+    "🔍 Scraper de Leads", 
+    "🤖 Filtrado IA", 
+    "✉️ Envio & Mailing"
+])
+
+# --- TAB 1: GESTIÓN DE CAMPAÑAS ---
+with tab_camp:
+    st.header("📂 Tus Campañas de Marketing")
     
-    # --- PANEL LATERAL (PARÁMETROS) ---
-    with st.expander("⚙️ Configurar Búsqueda", expanded=True):
-        col_a, col_b = st.columns(2)
-        with col_a:
-            keywords = st.text_input("Palabras clave", value="fabricante dispenser agua caliente mate")
-            zone = st.text_input("Zona o Ubicación", value="Argentina")
-        with col_b:
-            exclude_sites_raw = st.text_input("Sitios a excluir (ej: mercadolibre, facebook, instagram)", value="mercadolibre, facebook, instagram, youtube, pinterest")
-            num_results = st.slider("Links a analizar", 10, 100, 20)
-
-    # --- PROCESAR PARÁMETROS ---
-    exclude_list = [s.strip().lower() for s in exclude_sites_raw.split(",") if s.strip()]
-    excl_str = " ".join([f"-site:{site}" for site in exclude_list])
-    final_query = f"{keywords} {zone} {excl_str}".strip()
-    st.code(f"Query enviada: {final_query}")
-
-    # Inicializar offset en session_state si no existe
-    if 'search_offset' not in st.session_state:
-        st.session_state.search_offset = 0
-
-    col1, col2 = st.columns(2)
-    
+    col1, col2 = st.columns([1, 2])
     with col1:
-        if st.button("🚀 Nueva Búsqueda (Primeros 100)", use_container_width=True):
-            st.session_state.search_offset = 0
-            st.rerun()
-
+        st.subheader("Crear Nueva Campaña")
+        new_name = st.text_input("Nombre de la Campaña", placeholder="Ej: Dispenser GBA Norte Mayo")
+        if st.button("Crear Campaña"):
+            if new_name:
+                cid = db.create_campaign(new_name)
+                st.success(f"Campaña '{new_name}' creada!")
+                st.rerun()
+    
     with col2:
-        if st.button("➕ Cargar Siguientes 100", use_container_width=True):
-            st.session_state.search_offset += 100
-            st.rerun()
+        st.subheader("Campañas Recientes")
+        if all_campaigns:
+            df_camp = pd.DataFrame(all_campaigns)[['name', 'status', 'created_at']]
+            st.dataframe(df_camp, use_container_width=True)
+        else:
+            st.info("Crea tu primera campaña para empezar.")
 
-    # Si hay un offset activo, ejecutamos la búsqueda
-    if 'last_query' not in st.session_state:
-        st.session_state.last_query = ""
+# --- TAB 2: SCRAPER (VINCULADO A CAMPAÑA) ---
+with tab_scrap:
+    if not active_campaign:
+        st.error("⚠️ Primero debes seleccionar o crear una campaña en la barra lateral.")
+    else:
+        st.header(f"🔍 Buscando Leads para: {active_campaign['name']}")
+        
+        with st.expander("⚙️ Configuración de Búsqueda", expanded=True):
+            col_a, col_b = st.columns(2)
+            with col_a:
+                keywords = st.text_input("Palabras clave", value=active_campaign.get('config', {}).get('keywords', "fabricante dispenser agua"))
+                zone = st.text_input("Zona", value=active_campaign.get('config', {}).get('zone', "Argentina"))
+            with col_b:
+                exclude_sites = st.text_input("Excluir sitios", value="mercadolibre, facebook, instagram, youtube")
+                num_results = st.slider("Resultados por bloque", 10, 100, 20)
 
-    # Lógica de ejecución automática tras pulsar botones
-    trigger_search = False
-    if final_query != st.session_state.last_query:
-        # Si la query cambió, reseteamos todo
-        st.session_state.search_offset = 0
-        st.session_state.last_query = final_query
-    
-    # Usamos un flag para saber si acabamos de pulsar un botón de búsqueda
-    # (En Streamlit esto se suele manejar con un botón que cambia el estado)
-    
-    # Para simplificar la UX, vamos a ejecutar la búsqueda si el offset es > 0 
-    # o si es la primera vez que se pulsa el botón principal.
-    
-    # RE-DISEÑO DEL BOTÓN PARA EVITAR CONFUSIÓN:
-    st.markdown(f"**Progreso actual:** Resultados del {st.session_state.search_offset + 1} al {st.session_state.search_offset + 100}")
+        # Lógica de Offset
+        if 'scrap_offset' not in st.session_state: st.session_state.scrap_offset = 0
+        
+        c1, c2, c3 = st.columns([1, 1, 2])
+        with c1:
+            if st.button("🔄 Reiniciar Búsqueda"):
+                st.session_state.scrap_offset = 0
+                st.rerun()
+        with c2:
+            if st.button("➕ Siguientes 100"):
+                st.session_state.scrap_offset += 100
+                st.rerun()
+        
+        st.write(f"Rango actual: {st.session_state.scrap_offset + 1} - {st.session_state.scrap_offset + 100}")
 
-    if st.button("🔍 Iniciar Proceso de Extracción", type="primary"):
-        with st.status(f"Analizando bloque {st.session_state.search_offset + 1} - {st.session_state.search_offset + 100}...") as status:
-            results = []
-            try:
-                # Obtenemos los leads existentes para evitar duplicados
-                existing_urls = set(db.get_all_leads()['website'].str.lower().tolist())
+        if st.button("🚀 Iniciar Extracción", type="primary"):
+            with st.status("Procesando búsqueda...") as status:
+                existing_leads = db.get_leads_by_campaign(active_campaign['id'])
+                existing_urls = {l['website'].lower() for l in existing_leads}
+                exclude_list = [s.strip().lower() for s in exclude_sites.split(",") if s.strip()]
+                
+                query = f"{keywords} {zone} " + " ".join([f"-site:{s}" for s in exclude_list])
                 
                 with DDGS() as ddgs:
-                    # Pedimos hasta el final del bloque actual
-                    total_to_fetch = st.session_state.search_offset + 100
-                    all_results = list(ddgs.text(final_query, max_results=total_to_fetch))
-                    
-                    # Nos quedamos solo con los últimos 100 (o los que haya en el bloque)
-                    current_batch = all_results[st.session_state.search_offset:]
-                
-                for idx, res in enumerate(current_batch):
+                    all_res = list(ddgs.text(query, max_results=st.session_state.scrap_offset + num_results))
+                    batch = all_res[st.session_state.scrap_offset:]
+
+                for res in batch:
                     url = res.get('href', '').lower()
-                    title = res.get('title', 'Sin título')
+                    if not url or any(s in url for s in exclude_list) or url in existing_urls:
+                        continue
                     
-                    # FILTRO DE EXCLUSIÓN
-                    should_exclude = any(site in url for site in exclude_list)
-                    # FILTRO DE DUPLICADOS (ya en DB)
-                    is_duplicate = url in existing_urls
-                    
-                    if url and not should_exclude and not is_duplicate:
-                        st.write(f"✅ Analizando: {url}")
+                    st.write(f"✅ Analizando: {url}")
+                    try:
+                        resp = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
+                        soup = BeautifulSoup(resp.text, 'html.parser')
+                        text = soup.get_text()
+                        
+                        emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
+                        whas = re.findall(r'\+?\d{10,13}', text)
+                        
+                        if emails:
+                            db.insert_lead({
+                                'company_name': res.get('title', 'Empresa desconocida'),
+                                'website': url,
+                                'email': emails[0],
+                                'whatsapp': whas[0] if whas else ""
+                            }, active_campaign['id'])
+                    except:
+                        continue
+                st.success("Búsqueda completada y guardada en la campaña.")
 
-
-                        # Lógica de extracción (simplificada aquí, pero igual a la anterior)
-                        try:
-                            headers = {'User-Agent': 'Mozilla/5.0'}
-                            resp = requests.get(url, headers=headers, timeout=5)
-                            text = resp.text
-                            
-                            emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
-                            wa = re.findall(r'(?:\+|00)?(?:54|54\s*9)?\s*(?:11|[23]\d{2})\s*\d{3,4}[\s-]*\d{4}', text)
-                            
-                            if emails or wa:
-                                lead = {
-                                    "company": title,
-                                    "website": url,
-                                    "email": ", ".join(set(emails)) if emails else "",
-                                    "whatsapp": ", ".join(set(wa)) if wa else "",
-                                    "niche": keywords,
-                                    "source": "DuckDuckGo",
-                                    "notes": "Scraper Web"
-                                }
-                                db.insert_lead(lead)
-                                results.append(lead)
-                        except:
-                            pass
-                status.update(label="¡Extracción completada!", state="complete")
-                st.success(f"Se encontraron y guardaron {len(results)} leads nuevos.")
-            except Exception as e:
-                st.error(f"Error: {e}")
-
-# --- TAB 2: DEPURACIÓN ---
-with tab2:
-    st.header("Gestión y Limpieza de Leads")
-    leads_df = db.get_all_leads()
-    
-    if not leads_df.empty:
-        # Filtros
-        status_filter = st.multiselect("Filtrar por estado", options=["Pendiente", "Validado", "Descartado", "Enviado"], default=["Pendiente", "Validado"])
-        filtered_df = leads_df[leads_df['status'].isin(status_filter)]
+# --- TAB 3: FILTRADO IA (DEEPSEEK) ---
+with tab_filter:
+    if active_campaign:
+        st.header(f"🤖 Filtrado Inteligente: {active_campaign['name']}")
+        leads = db.get_leads_by_campaign(active_campaign['id'])
         
-        st.dataframe(filtered_df, use_container_width=True)
-        
-        # Acciones masivas/individuales
-        with st.expander("✏️ Editar Lead"):
-            lead_id = st.number_input("ID del Lead a editar", min_value=1, step=1)
-            new_status = st.selectbox("Nuevo Estado", ["Pendiente", "Validado", "Descartado"])
-            new_notes = st.text_area("Notas")
-            if st.button("Actualizar Lead"):
-                db.update_lead_status(lead_id, new_status)
-                db.update_lead_notes(lead_id, new_notes)
-                st.success("Lead actualizado.")
-                st.rerun()
-    else:
-        st.info("No hay leads en la base de datos.")
-
-# --- TAB 3: CAMPAÑAS ---
-with tab3:
-    st.header("Enviar Campaña de Email")
-    
-    # Seleccionar destinatarios
-    leads_df = db.get_all_leads()
-    valid_leads = leads_df[leads_df['status'] == 'Validado']
-    
-    if valid_leads.empty:
-        st.warning("No hay leads con estado 'Validado'. Primero depura los leads en la pestaña anterior.")
-    else:
-        st.write(f"Destinatarios listos: {len(valid_leads)}")
-        
-        subject = st.text_input("Asunto del correo", value="Propuesta PagarQR - Mejora tus ventas")
-        template = st.text_area("Cuerpo del mensaje (HTML permitido)", height=300)
-        
-        if st.button("📧 Enviar a todos los validados"):
-            sent_count = 0
-            for _, row in valid_leads.iterrows():
-                if row['email']:
-                    # Tomar el primer email si hay varios
-                    email = row['email'].split(",")[0].strip()
-                    success, msg = mailer.send_email(email, subject, template)
-                    if success:
-                        db.update_lead_status(row['id'], 'Enviado')
-                        sent_count += 1
-                    else:
-                        st.error(f"Error enviando a {email}: {msg}")
+        if not leads:
+            st.info("No hay leads para filtrar aún.")
+        else:
+            df_leads = pd.DataFrame(leads)
             
-            st.success(f"Campaña finalizada. Se enviaron {sent_count} correos.")
-            st.rerun()
+            st.subheader("Parámetros de Calidad (IA)")
+            manual_rules = st.text_area("Instrucciones para la IA", "Descarta si el mail es de un diario, revista o si parece un directorio general.")
+            
+            if st.button("🧠 Ejecutar Filtro DeepSeek"):
+                with st.spinner("DeepSeek está analizando los prospectos..."):
+                    for l in leads:
+                        if l['status'] == 'new':
+                            res = ai.filter_lead(l['company_name'], l['email'], l['website'], manual_rules)
+                            db.update_lead_status(l['id'], res['status'], res.get('score', 0), res.get('reason', ""))
+                    st.success("Filtrado completado!")
+                    st.rerun()
 
-st.divider()
-st.caption("PagarQR CRM & Scraper - v2.0")
+            # Mostrar tabla con estados
+            st.dataframe(df_leads[['company_name', 'email', 'status', 'ai_score', 'ai_reason']], use_container_width=True)
+
+# --- TAB 4: MAILING ---
+with tab_mail:
+    st.header("✉️ Configuración de Envío")
+    
+    col_l, col_r = st.columns(2)
+    with col_l:
+        st.subheader("Configuración SMTP (Segura)")
+        host = st.text_input("Servidor SMTP", value="smtp.gmail.com")
+        user_mail = st.text_input("Email", value="")
+        pass_mail = st.text_input("Contraseña / App Token", type="password")
+        if st.button("Guardar Credenciales"):
+            # En un entorno real guardaríamos esto en Firestore encriptado
+            st.session_state.smtp_config = {
+                'host': host,
+                'user': user_mail,
+                'pass': enc.encrypt(pass_mail)
+            }
+            st.success("Configuración guardada temporalmente.")
+
+    with col_r:
+        st.subheader("Armar Correo")
+        subject = st.text_input("Asunto")
+        message = st.text_area("Cuerpo del Mensaje (HTML soportado)")
+        attachment = st.file_uploader("Adjuntar Imagen para el mailing", type=['png', 'jpg', 'jpeg'])
+        
+        if st.button("✨ Generar Texto con IA"):
+            if active_campaign:
+                msg = ai.generate_email(active_campaign['name'], "Venta de dispensers de agua para empresas")
+                st.write(msg)
+            else:
+                st.error("Selecciona una campaña primero.")
+
+    st.divider()
+    st.subheader("🗓️ Programación y Envío")
+    send_date = st.date_input("Fecha de envío")
+    send_time = st.time_input("Hora de envío")
+    
+    if st.button("🚀 ENVIAR CAMPAÑA AHORA"):
+        st.warning("Esto enviará mails a todos los leads marcados como 'VALID' en la campaña actual.")
+        # Lógica de envío masivo aquí usando EmailSender

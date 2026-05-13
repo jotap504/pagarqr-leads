@@ -5,3 +5,6 @@ email-validator
 requests
 beautifulsoup4
 ddgs
+firebase-admin
+openai
+cryptography
