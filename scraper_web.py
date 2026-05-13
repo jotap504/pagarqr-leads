@@ -207,6 +207,27 @@ with tab_scrap:
                         continue
                     
                     st.write(f"🔍 Analizando: {url}")
+                    emails = []
+                    
+                    try:
+                        # Intentar entrar a la web
+                        resp = scraper.get(url, timeout=10)
+                        if resp.status_code == 200:
+                            emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', resp.text)
+                            
+                            # Si no hay en portada, buscar contacto
+                            if not emails:
+                                soup = BeautifulSoup(resp.text, 'html.parser')
+                                for a in soup.find_all('a', href=True):
+                                    if any(x in a.get_text().lower() for x in ['contact', 'nosotros', 'quienes']):
+                                        c_url = a['href']
+                                        if c_url.startswith('/'): c_url = url.rstrip('/') + c_url
+                                        elif not c_url.startswith('http'): c_url = url.rstrip('/') + '/' + c_url
+                                        c_resp = scraper.get(c_url, timeout=5)
+                                        emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', c_resp.text)
+                                        if emails: break
+                    except:
+                        pass
                     
                     # --- INTENTO 2: ENTRAR A LA WEB SI NO HAY EN SNIPPET ---
                     if not emails:
