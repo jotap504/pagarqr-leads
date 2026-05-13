@@ -133,13 +133,12 @@ with tab_scrap:
                 # --- PROCESAR PARÁMETROS ---
                 keyword_list = [k.strip() for k in keywords.split(",") if k.strip()]
                 exclude_list = [s.strip().lower() for s in exclude_sites.split(",") if s.strip()]
-                urls_to_analyze = []
+                urls_to_analyze = {} # Usamos dict para guardar URL -> Fuente
 
                 # --- MODO 1: OPENSTREETMAP (MAPA) ---
-                st.write(f"🗺️ Buscando en el mapa...")
+                st.write(f"🗺️ Buscando empresas en el mapa...")
                 try:
                     overpass_url = "https://overpass-api.de/api/interpreter"
-                    # Usamos la ciudad si está, si no el país
                     area_name = city_filter if city_filter else zone_label
                     for k in keyword_list:
                         osm_query = f"""
@@ -148,6 +147,7 @@ with tab_scrap:
                         (
                           nwr["name"~"{k}",i](area.searchArea);
                           nwr["shop"~"{k}",i](area.searchArea);
+                          nwr["industrial"~"{k}",i](area.searchArea);
                         );
                         out body;
                         """
@@ -160,53 +160,44 @@ with tab_scrap:
                                 website = el.get('tags', {}).get('website')
                                 if website:
                                     if not website.startswith('http'): website = 'http://' + website
-                                    urls_to_analyze.append(website)
+                                    urls_to_analyze[website] = "🗺️ Mapa (OSM)"
                 except Exception as e:
                     st.write(f"⚠️ El mapa no respondió.")
 
-                # --- MODO 2: BRAVE / DUCKDUCKGO (FALLBACK) ---
+                # --- MODO 2: BRAVE (WEB) ---
                 for k in keyword_list:
-                    st.write(f"📡 Buscando en la web: *{k}*...")
+                    st.write(f"📡 Buscando en Brave: *{k}*...")
                     try:
-                        # Intentamos con un motor alternativo vía requests directo
-                        # para evitar bloqueos de librerías conocidas
                         search_url = f"https://search.brave.com/search?q={k}+{area_name}"
-                        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                        headers = {'User-Agent': 'Mozilla/5.0'}
                         b_resp = requests.get(search_url, headers=headers, timeout=10)
                         b_urls = re.findall(r'href="(https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}[^"]*)"', b_resp.text)
-                        # Filtrar solo links que no sean de Brave/Google/etc
                         for u in b_urls:
-                            if not any(x in u for x in ['brave.com', 'google', 'facebook', 'instagram', 'twitter', 'microsoft']):
-                                urls_to_analyze.append(u)
+                            if u not in urls_to_analyze and not any(x in u for x in ['brave.com', 'google', 'facebook', 'instagram']):
+                                urls_to_analyze[u] = "🦁 Brave Search"
                     except:
                         pass
 
-
-
-                    # Construir query de Google
-                    q = f"{k} {zone_label} " + " ".join([f"-site:{s}" for s in exclude_list])
+                # --- MODO 3: GOOGLE (WEB) ---
+                for k in keyword_list:
                     st.write(f"📡 Buscando en Google: *{k}*...")
                     try:
-                        # Google Search via googlesearch-python
-                        # Buscamos los primeros N resultados
-                        results = search(q, num_results=num_results // len(keyword_list) + 1, lang="es")
-                        for url in results:
-                            urls_to_analyze.append(url)
-                    except Exception as e:
-                        st.write(f"⚠️ Error en Google Search: {e}")
-                        continue
+                        results = search(f"{k} {area_name}", num_results=10, lang="es")
+                        for u in results:
+                            if u not in urls_to_analyze:
+                                urls_to_analyze[u] = "🔍 Google"
+                    except:
+                        pass
 
-                # Quitar duplicados
-                unique_urls = list(set(urls_to_analyze))
-                st.write(f"🔎 Google encontró {len(unique_urls)} páginas para analizar.")
+                st.write(f"🔎 Total de páginas únicas a analizar: {len(urls_to_analyze)}")
                 
                 leads_encontrados = 0
-                for url in unique_urls:
+                for url, source in urls_to_analyze.items():
                     url = url.lower()
                     if any(s in url for s in exclude_list) or url in existing_urls:
                         continue
                     
-                    st.write(f"🔍 Analizando: {url}")
+                    st.write(f"🔍 Analizando [{source}]: {url}")
                     emails = []
                     title = url.split("//")[-1].split("/")[0] # Nombre base del sitio como título
                     
@@ -238,14 +229,16 @@ with tab_scrap:
                     
                     if emails:
                         db.insert_lead({
-                            'company_name': title[:50], # Limitar largo del título
+                            'company_name': title[:50],
                             'website': url,
                             'email': emails[0],
+                            'source': source, # Guardamos la fuente
                             'whatsapp': "" 
                         }, active_campaign['id'])
-                        st.write(f"✨ ¡Lead encontrado!: {emails[0]}")
+                        st.write(f"✨ ¡Lead encontrado!: {emails[0]} ({source})")
                         leads_encontrados += 1
                         existing_urls.add(url)
+
                     else:
                         st.write(f"❌ No se detectaron emails públicos.")
 

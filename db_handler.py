@@ -68,14 +68,13 @@ class Database:
     # --- LEADS ---
     def insert_lead(self, lead_data, campaign_id):
         if not self.db: return
-        # El lead_data debe incluir 'email', 'website', etc.
-        lead_ref = self.db.collection('leads').document()
         lead_data['campaign_id'] = campaign_id
         lead_data['created_at'] = datetime.now()
         lead_data['status'] = lead_data.get('status', 'new') # new, valid, invalid, discarded
         lead_data['ai_score'] = 0
         lead_data['ai_reason'] = ""
-        lead_ref.set(lead_data)
+        lead_data['source'] = lead_data.get('source', 'unknown')
+        self.db.collection('leads').add(lead_data)
 
     def get_leads_by_campaign(self, campaign_id):
         if not self.db: return []
